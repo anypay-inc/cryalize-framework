@@ -41,11 +41,16 @@ This is to make the functions upgradable. [ERC1538](https://github.com/ethereum/
 
 This function is supposed to simply call *canSend* of the implementation contract.
 
-(Quoted from [EIP 1411](https://github.com/ethereum/EIPs/issues/1411))
+(Quoted from [EIP 1411](https://github.com/ethereum/EIPs/issues/1411), except the part that the second parameter of the response is an array)
 Transfers of securities may fail for a number of reasons.
 The function will return both a ESC (Ethereum Status Code) following the EIP-1066 standard, and additional bytes32 parameters that can be used to define application specific reason codes with additional details for an invalid transfer.
 
-##### 
+##### Notes
+
+Although the transferability depends on the *from* address and the amount as well as the *to* address in the end, there are some cases that an application wants to figure out if an address is qualified to hold any amount of the token before the user tries to find a counterpart to transfer it with.
+
+We thought about adding another function which takes single parameter of the address. However, we eventually decided not to do that due to the complexity caused by that on the overall framework. For this usecase, you are suggested to call *canSend(<An address which you're sure that has some balances and is qualified to transfer>, _address, 1)*.
+
 
 #### interface
 
@@ -69,10 +74,9 @@ contract STImplSample {
     }
 
     function canSend(address _from, address _to, uint256 _amount) external view returns (byte, bytes32[]) {
-        byte returnCode;
         bytes32[] additionalInvalidCodes;
         for (uint256 i = 0; i < regulatorServices.length; i++) {
-            additionalInvalidCodes.push(regulatorServices[i].getInvalidReasonCodes(_from, _to, _amount);
+            additionalInvalidCodes.push(regulatorServices[i].getInvalidReasonCodes(_from, _to, _amount));
         }
         
         // FIXME return more appropriate return code
@@ -137,8 +141,16 @@ contract TheRegDRegulatorService is ISTRegulatorService {
     /*
      * @dev Check if the transfer is compliant with RegD and return set of invalid reason codes. Return empty array if valid.
      */
-    function getInvalidReasonCodes(address _from, address _to, uint256 _amount) external view isAuthorized returns (bytes32[]) {    
-        ...
+    function getInvalidReasonCodes(address _from, address _to, uint256 _amount) external view isAuthorized returns (bytes32[]) {
+        bytes32[] additionalInvalidCodes;
+        var (toAccreditedUsaValue, toAccreditedUsaUri, toAccreditedUsaDocumentHash) = registry.getAttribute(_to, "accredited_usa");
+        if (toAccreditedUsaValue != "true") {
+            additionalInvalidCodes.push(0x123);
+        }
+        
+        // TODO check other factors
+        
+        return additionalInvalidCodes;
     }
     
 }
@@ -150,13 +162,13 @@ contract TheRegDRegulatorService is ISTRegulatorService {
 
 ```solidity
 contract STRegistrySample {
-
+    
     struct attributeValue {
-        bytes32 _value;
-        string _uri; // optional in some cases
-        bytes32 _documentHash // optional in some cases
+        bytes32 value;
+        string uri; // optional in some cases
+        bytes32 documentHash; // optional in some cases
     }
-        
+    
     address owner;
     
     /*
@@ -189,14 +201,15 @@ contract STRegistrySample {
         authorizedAttributes[_address][_attribute] = false;
     }
     
-    function getAttribute(address _address, bytes32 _attribute) public view isAuthorized(_attribute) returns(attributeValue) {
-        return attributes[_address][_attribute]);
+    function getAttribute(address _address, bytes32 _attribute) public view isAuthorized(_attribute) returns(bytes32, string, bytes32) {
+        attributeValue attr = attributes[_address][_attribute];
+        return (attr.value, attr.uri, attr.documentHash);
     }
     
     function setAttribute(address _address, bytes32 _attribute, bytes32 _value, string _uri, bytes32 _documentHash) public isAuthorized(_attribute) returns (bool) {
         attributes[_address][_attribute] = attributeValue(_value, _uri, _documentHash);
         return true;
     }
-
+    
 }
 ```
